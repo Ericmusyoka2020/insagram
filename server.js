@@ -14,7 +14,8 @@ app.get('/preview', (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).send('URL is required');
 
-    const yt = spawn('yt-dlp', ['-j', url]);
+    // yt-dlp in quiet mode, JSON output
+    const yt = spawn('yt-dlp', ['--quiet', '-j', url]);
 
     let data = '';
     yt.stdout.on('data', chunk => data += chunk);
@@ -29,27 +30,29 @@ app.get('/preview', (req, res) => {
         }
     });
 
+    // Only log real errors
     yt.stderr.on('data', chunk => {
-        console.error(chunk.toString());
+        console.error("yt-dlp preview error:", chunk.toString());
     });
 });
 
 // ------------------ Download endpoint ------------------
-// Streams video directly to the browser
+// Streams video directly to the browser without showing progress logs
 app.get('/download', (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).send('URL is required');
 
-    // yt-dlp spawns a process that writes to stdout
-    const yt = spawn('yt-dlp', ['-f', 'best', '-o', '-', url], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // yt-dlp quiet mode, output to stdout
+    const yt = spawn('yt-dlp', ['--quiet', '-f', 'b', '-o', '-', url], { stdio: ['ignore', 'pipe', 'pipe'] });
 
     res.setHeader('Content-Disposition', 'attachment; filename=instagram_video.mp4');
     res.setHeader('Content-Type', 'video/mp4');
 
     yt.stdout.pipe(res);
 
+    // Only log actual errors
     yt.stderr.on('data', chunk => {
-        console.error(chunk.toString());
+        console.error("yt-dlp download error:", chunk.toString());
     });
 
     yt.on('close', code => {
@@ -57,4 +60,7 @@ app.get('/download', (req, res) => {
     });
 });
 
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+// ------------------ Start server ------------------
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Backend running on port ${PORT}`);
+});
