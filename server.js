@@ -1,55 +1,60 @@
 const express = require('express');
 const cors = require('cors');
-const { exec } = require('child_process');
-const path = require('path');
-const fs = require('fs');
+const { spawn } = require('child_process');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-// Temp folder for downloads
-const downloadDir = path.join(__dirname, 'downloads');
-if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir);
-
-// Preview: get video title only
+// ------------------ Preview endpoint ------------------
+// Returns the video title only
 app.get('/preview', (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).send('URL is required');
 
-    // Use yt-dlp to get metadata JSON
-    const command = `yt-dlp -j ${url}`;
+    const yt = spawn('yt-dlp', ['-j', url]);
 
-    exec(command, (err, stdout, stderr) => {
-        if (err) return res.status(500).send('Error fetching video info');
+    let data = '';
+    yt.stdout.on('data', chunk => data += chunk);
 
+    yt.on('close', code => {
         try {
-            const info = JSON.parse(stdout);
+            const info = JSON.parse(data);
             const title = info.title || 'Unknown Title';
             res.json({ title });
-        } catch (e) {
+        } catch (err) {
             res.status(500).send('Error parsing video info');
         }
     });
+
+    yt.stderr.on('data', chunk => {
+        console.error(chunk.toString());
+    });
 });
 
-// Download video to browser
+// ------------------ Download endpoint ------------------
+// Streams video directly to the browser
 app.get('/download', (req, res) => {
     const url = req.query.url;
     if (!url) return res.status(400).send('URL is required');
 
-    const tempFile = path.join(downloadDir, `video_${Date.now()}.mp4`);
-    const command = `yt-dlp -f best -o "${tempFile}" ${url}`;
+    // yt-dlp spawns a process that writes to stdout
+    const yt = spawn('yt-dlp', ['-f', 'best', '-o', '-', url], { stdio: ['ignore', 'pipe', 'pipe'] });
 
-    exec(command, (err, stdout, stderr) => {
-        if (err) return res.status(500).send('Error downloading video');
+    res.setHeader('Content-Disposition', 'attachment; filename=instagram_video.mp4');
+    res.setHeader('Content-Type', 'video/mp4');
 
-        res.download(tempFile, 'instagram_video.mp4', () => {
-            fs.unlink(tempFile, () => {});
-        });
+    yt.stdout.pipe(res);
+
+    yt.stderr.on('data', chunk => {
+        console.error(chunk.toString());
+    });
+
+    yt.on('close', code => {
+        console.log('Download finished');
     });
 });
 
-app.listen(PORT, () => console.log(`Backend running at http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
