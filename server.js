@@ -1,53 +1,38 @@
-const express = require('express');
-const cors = require('cors');
-const ytdlp = require('yt-dlp-exec'); // <--- use this instead of spawn
+const express = require("express");
+const cors = require("cors");
+const { exec } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const { v4: uuidv4 } = require("uuid");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(cors());
-app.use(express.json());
 
-// ------------------ Preview endpoint ------------------
-app.get('/preview', async (req, res) => {
-    const url = req.query.url;
-    if (!url) return res.status(400).send('URL is required');
+app.get("/download", (req, res) => {
+    const videoUrl = req.query.url;
+    if (!videoUrl) return res.status(400).json({ error: "No URL provided" });
 
-    try {
-        const info = await ytdlp(url, {
-            dumpSingleJson: true,
-            quiet: true,
-        });
-        res.json({ title: info.title || 'Unknown Title' });
-    } catch (err) {
-        console.error("yt-dlp preview error:", err);
-        res.status(500).send('Error fetching video info');
-    }
-});
+    const tmpFile = path.join(__dirname, `${uuidv4()}.mp4`);
+    const command = `yt-dlp -f best -o "${tmpFile}" "${videoUrl}"`;
 
-// ------------------ Download endpoint ------------------
-app.get('/download', async (req, res) => {
-    const url = req.query.url;
-    if (!url) return res.status(400).send('URL is required');
+    exec(command, (error, stdout, stderr) => {
+        if (error) {
+            console.error("yt-dlp error:", stderr || error.message);
+            return res.status(500).json({ error: "Failed to download video" });
+        }
 
-    try {
-        const video = await ytdlp(url, {
-            format: 'b',
-            quiet: true,
-            output: '-',
-        });
-
-        res.setHeader('Content-Disposition', 'attachment; filename=instagram_video.mp4');
+        // Stream the downloaded file
+        res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
         res.setHeader('Content-Type', 'video/mp4');
-        res.send(video);
 
-    } catch (err) {
-        console.error("yt-dlp download error:", err);
-        res.status(500).send('Error downloading video');
-    }
+        const readStream = fs.createReadStream(tmpFile);
+        readStream.pipe(res);
+
+        readStream.on('close', () => {
+            fs.unlink(tmpFile, () => {}); // Delete temp file after streaming
+        });
+    });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Backend running on port ${PORT}`);
-});
-
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
